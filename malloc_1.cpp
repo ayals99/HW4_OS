@@ -3,7 +3,7 @@
 #define MAX_SMALLOC_SIZE 100000000 // 10^8
 #define ZERO_SMALLOC 0
 /**
- void* smalloc(size_t size)
+void* smalloc(size_t size)
     - Tries to allocate ‘size’ bytes.
     @return:
         Success:
@@ -18,7 +18,10 @@ void* smalloc(size_t size){
         return NULL;
     }
 
-    void* newBlock = sbrk(size);
+    // TODO: check if need to cast to (intptr_t), which is "long int"
+    long int sizeCast = (long int)size;
+
+    void* newBlock = sbrk(sizeCast);
 
     if (newBlock == (void*)-1) { // sbrk fails
         return NULL;
