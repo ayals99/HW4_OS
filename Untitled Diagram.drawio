@@ -368,13 +368,19 @@
           <mxGeometry x="1061.4" y="150" width="108.6" height="105" as="geometry" />
         </mxCell>
         <mxCell id="lOClj2oo7x6Ww53FL5YU-110" value="FRAME #0" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;glass=0;strokeWidth=1;shadow=0;arcSize=0;" vertex="1" parent="WIyWlLk6GJQsqaUBKTNV-1">
-          <mxGeometry x="1063" y="413" width="107" height="105" as="geometry" />
+          <mxGeometry x="1061" y="410" width="107" height="105" as="geometry" />
         </mxCell>
         <mxCell id="lOClj2oo7x6Ww53FL5YU-111" value="....." style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;rotation=-90;fontStyle=1" vertex="1" parent="WIyWlLk6GJQsqaUBKTNV-1">
           <mxGeometry x="1084" y="253" width="40" height="30" as="geometry" />
         </mxCell>
         <mxCell id="lOClj2oo7x6Ww53FL5YU-112" value="....." style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;rotation=-90;fontStyle=1" vertex="1" parent="WIyWlLk6GJQsqaUBKTNV-1">
           <mxGeometry x="1086.4" y="385" width="40" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="lOClj2oo7x6Ww53FL5YU-113" value="" style="shape=curlyBracket;whiteSpace=wrap;html=1;rounded=1;labelPosition=left;verticalLabelPosition=middle;align=right;verticalAlign=middle;rotation=-90;" vertex="1" parent="WIyWlLk6GJQsqaUBKTNV-1">
+          <mxGeometry x="1105.7" y="465" width="20" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="lOClj2oo7x6Ww53FL5YU-114" value="2^20 frames&lt;br&gt;&lt;div&gt;Virtual address space&lt;/div&gt;" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="WIyWlLk6GJQsqaUBKTNV-1">
+          <mxGeometry x="1046.5" y="530" width="140" height="40" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>
