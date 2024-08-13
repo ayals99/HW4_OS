@@ -12,7 +12,6 @@ struct MallocMetadata{
     bool is_free;
     MallocMetadata* next;
     MallocMetadata* prev;
-
     MallocMetadata* getNext(){
         return next;
     }
@@ -105,8 +104,8 @@ struct MetadataList {
 MetadataList freeList = {NULL, NULL};
 
 /**
- * Searches for a free block with at least ‘size’ bytes or allocates (sbrk()) one if none are
- * found.
+ * Searches for a free block with at least ‘size’ bytes
+ * or allocates (sbrk()) one if none are found.
  * @Return:
  * i. Success – returns pointer to the first byte in the allocated block
  *      (excluding the meta-data of course)
@@ -139,7 +138,9 @@ void* smalloc(size_t size){
     metadata->prev = NULL;
 
     // return pointer to first byte in allocated block if successful
-    return newBlock + sizeof(MallocMetadata);
+    // notice that we want to jump sizeof(MallocMetadata) bytes ahead
+    // and char is 1 byte, so we cast to char* and add sizeof(MallocMetadata):
+    return (void*)((char*)newBlock + sizeof(MallocMetadata));
 }
 
 /**
@@ -191,34 +192,34 @@ void* srealloc(void* oldp, size_t size){
 
 }
 
-/** Returns the number of allocated blocks in the heap that are currently free.*/
+/** @Return: Number of allocated blocks in the heap that are currently free.*/
 size_t _num_free_blocks(){
 
 }
 
-/** Returns the number of bytes in all allocated blocks in the heap that are currently free,
+/** @Return: Number of bytes in all allocated blocks in the heap that are currently free,
  * excluding the bytes used by the meta-data structs.*/
 size_t _num_free_bytes(){
 
 }
 
-/** Returns the overall (free and used) number of allocated blocks in the heap.*/
+/** @Return: the overall (free and used) number of allocated blocks in the heap.*/
 size_t _num_allocated_blocks(){
 
 }
 
-/** Returns the overall number (free and used) of allocated bytes in the heap,
+/** @Return: The overall number (free and used) of allocated bytes in the heap,
  * excluding the bytes used by the meta-data structs.*/
 size_t _num_allocated_bytes(){
 
 }
 
-/** Returns the overall number of meta-data bytes currently in the heap.*/
+/** @Return: The overall number of meta-data bytes currently in the heap.*/
 size_t _num_meta_data_bytes(){
 
 }
 
-/** Returns the number of bytes of a single meta-data structure in your system. */
+/** @Return: The number of bytes of a single meta-data structure in your system. */
 size_t _size_meta_data(){
 
 }
