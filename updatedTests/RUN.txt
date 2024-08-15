@@ -1,0 +1,9 @@
+turn ur malloc_4.cpp to malloc_4.h 
+or create a copy and give it that name
+
+
+give the script permission with chmod+x 
+then run script
+
+
+change back ur malloc_4 to cpp when ur done

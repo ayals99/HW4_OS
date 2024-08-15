@@ -23,7 +23,7 @@ void* smalloc(size_t size){
 
     void* newBlock = sbrk(sizeCast);
 
-    if (newBlock == (void*)-1) { // sbrk fails
+    if (newBlock == (void*)(-1)) { // sbrk fails
         return NULL;
     }
 

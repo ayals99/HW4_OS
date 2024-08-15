@@ -2,9 +2,12 @@
 // it’s not going to change.
 
 #include <unistd.h>
+#include <string.h>
+
 #define NOT_FOUND NULL
 #define MAX_SMALLOC_SIZE 100000000 // 10^8
 #define ZERO_SMALLOC 0
+#define ZERO 0
 
 
 struct MallocMetadata{
@@ -12,36 +15,21 @@ struct MallocMetadata{
     bool is_free;
     MallocMetadata* next;
     MallocMetadata* prev;
-    MallocMetadata* getNext(){
-        return next;
-    }
-    MallocMetadata* getPrev(){
-        return prev;
-    }
-    size_t getSize(){
-        return size;
-    }
-    bool isFree(){
-        return is_free;
-    }
 };
+
+int num_free_block = ZERO; // every time we turn is_free to "true" we increment by 1
+int num_free_bytes = ZERO; // every time we turn is_free to "true" we increment by the size of the block
+
+int num_allocated_blocks = ZERO; // every time we add a block to the list we increment by 1
+int num_allocated_bytes = ZERO; // every time we add a block to the list we increment by the size of the block
 
 struct MetadataList {
     MallocMetadata* head;
     MallocMetadata* tail;
 
-    void* _findAvailableBlock(size_t size){
-        MallocMetadata* current = freeList.head;
-        while (current != NULL) {
-            if (current->size >= size) {
-                return current;
-            }
-            current = current->next;
-        }
-        return NOT_FOUND;
-    }
+    MetadataList() : head(NULL), tail(NULL) {}
 
-    void addToList(MallocMetadata* metadata) {
+    void _addToList(MallocMetadata *metadata) {
         if (head == NULL) {
             head = metadata;
             tail = metadata;
@@ -66,12 +54,12 @@ struct MetadataList {
             return;
         }
 
-        MallocMetadata* current = head;
+        MallocMetadata *current = head;
 
         // if reached here then need to add to middle of list, since not head and not tail:
         // will add before the first block with a higher address
         while (current != NULL) {
-            if (metadata < current){
+            if (metadata < current) {
                 metadata->next = current;
                 metadata->prev = current->prev;
                 current->prev->next = metadata; // notice prev!=NULL exists since "current" is not head
@@ -81,27 +69,12 @@ struct MetadataList {
             current = current->next;
         }
     }
-
-    void removeFromList(MallocMetadata* metadata){
-        if (metadata == head) {
-            head = metadata->next;
-        }
-        if (metadata == tail) {
-            tail = metadata->prev;
-        }
-        if (metadata->prev != NULL) {
-            metadata->prev->next = metadata->next;
-        }
-        if (metadata->next != NULL) {
-            metadata->next->prev = metadata->prev;
-        }
-    }
 };
 
-
-
 /** Global variables */
-MetadataList freeList = {NULL, NULL};
+MetadataList blockList = MetadataList();
+
+
 
 /**
  * Searches for a free block with at least ‘size’ bytes
@@ -119,28 +92,49 @@ void* smalloc(size_t size){
     }
 
     // search through list for a block at least size bytes
-    void* newBlock = freeList._findAvailableBlock(size);
+    void* newBlock = NOT_FOUND;
+
+    MallocMetadata* current = blockList.head;
+    while (current != NULL) {
+        if (current->is_free && current->size >= size) {
+            current->is_free = false;
+            num_free_block--;
+            num_free_bytes -= (int)(current->size);
+            newBlock = current;
+            break;
+        }
+        current = current->next;
+    }
+
     // if none found, allocate a new block using sbrk
     if (newBlock == NOT_FOUND) {
         // allocate new block with extra room for metadata
-        newBlock = sbrk(size + sizeof(MallocMetadata));
-    }
-    // return NULL if sbrk  failed
-    if (newBlock == (void*)-1) {
-        return NULL;
+        newBlock = (MallocMetadata*) sbrk(size + sizeof(MallocMetadata));
+        num_allocated_blocks++;
+        num_allocated_bytes += (int)size;
+
+
+        // return NULL if sbrk  failed
+        if ( newBlock == (void*)(-1) ) {
+            return NULL;
+        }
+        // update metadata list
+        // write metadata at start of new block
+        MallocMetadata* newBlockMetadata = (MallocMetadata*)newBlock;
+        newBlockMetadata->size = size;
+        newBlockMetadata->is_free = false;
+        newBlockMetadata->next = NULL;
+        newBlockMetadata->prev = NULL;
+
+        blockList._addToList(newBlockMetadata);
     }
 
-    // write metadata at start of new block
-    MallocMetadata* metadata = (MallocMetadata*)newBlock;
-    metadata->size = size;
-    metadata->is_free = false;
-    metadata->next = NULL;
-    metadata->prev = NULL;
+
 
     // return pointer to first byte in allocated block if successful
     // notice that we want to jump sizeof(MallocMetadata) bytes ahead
     // and char is 1 byte, so we cast to char* and add sizeof(MallocMetadata):
-    return (void*)((char*)newBlock + sizeof(MallocMetadata));
+    return (void*) ((char*)newBlock + sizeof(MallocMetadata));
 }
 
 /**
@@ -155,7 +149,15 @@ void* smalloc(size_t size){
  *      c. If sbrk fails in allocating the needed space, return NULL.*/
 // You should use std::memset for setting values to 0 in your scalloc().
 void* scalloc(size_t num, size_t size){
-
+    size_t totalSize = num * size;
+    // notice that scalloc is similar to smalloc, so we can use smalloc to allocate the block
+    // if totalSize is greater than 10^8, then smalloc will return NULL
+    // notice: (totalSize == 0) if and only if (num == 0 || size == 0)
+    void* newBlock = smalloc(totalSize);
+    if (newBlock == NULL) {
+        return NULL;
+    }
+    return memset(newBlock, 0, totalSize);
 }
 
 /**
@@ -167,7 +169,16 @@ void* scalloc(size_t num, size_t size){
 //  legal pointers that point to the first allocated byte,
 //  the same ones that are returned by the allocation functions.
 void sfree(void* p){
-
+    if (p == NULL) {
+        return;
+    }
+    if ( ( (MallocMetadata*) ( ((char*)p) - sizeof(MallocMetadata) ))->is_free){
+        return;
+    }
+    MallocMetadata* blockMetadata = (MallocMetadata*)( ((char*)p) - sizeof(MallocMetadata));
+    blockMetadata->is_free = true;
+    num_free_block++;
+    num_free_bytes += (int)(blockMetadata->size);
 }
 
 /**
@@ -189,37 +200,64 @@ void sfree(void* p){
 // legal pointers that point to the first allocated byte,
 // the same ones that are returned by the allocation functions.
 void* srealloc(void* oldp, size_t size){
+    if (size == ZERO || size > MAX_SMALLOC_SIZE) {
+        return NULL;
+    }
 
+    if (oldp == NULL) {
+        return smalloc(size);
+    }
+
+    MallocMetadata* oldpBlockMetadata = (MallocMetadata*)( ((char*)oldp) - sizeof(MallocMetadata));
+    size_t oldpSize = oldpBlockMetadata->size;
+
+    if (size <= oldpSize){
+        if (oldpBlockMetadata->is_free){
+            oldpBlockMetadata->is_free = false;
+            num_free_block--;
+            num_free_bytes -= (int)(oldpSize);
+        }
+        return oldp;
+    }
+    else{ // if size > oldpBlockMetadata->size
+        void* newBlock = smalloc(size);
+        if (newBlock == NULL) {
+            return NULL;
+        }
+        memmove(newBlock, oldp, oldpSize);
+        sfree(oldp);
+        return newBlock;
+    }
 }
 
 /** @Return: Number of allocated blocks in the heap that are currently free.*/
 size_t _num_free_blocks(){
-
+    return (size_t)num_free_block;
 }
 
 /** @Return: Number of bytes in all allocated blocks in the heap that are currently free,
  * excluding the bytes used by the meta-data structs.*/
 size_t _num_free_bytes(){
-
+    return (size_t)num_free_bytes;
 }
 
 /** @Return: the overall (free and used) number of allocated blocks in the heap.*/
 size_t _num_allocated_blocks(){
-
+    return (size_t)num_allocated_blocks;
 }
 
 /** @Return: The overall number (free and used) of allocated bytes in the heap,
  * excluding the bytes used by the meta-data structs.*/
 size_t _num_allocated_bytes(){
-
+    return (size_t)num_allocated_bytes;
 }
 
 /** @Return: The overall number of meta-data bytes currently in the heap.*/
 size_t _num_meta_data_bytes(){
-
+    return (size_t) (num_allocated_blocks * sizeof(MallocMetadata));
 }
 
 /** @Return: The number of bytes of a single meta-data structure in your system. */
 size_t _size_meta_data(){
-
+    return (size_t)sizeof(MallocMetadata);
 }
