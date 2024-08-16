@@ -4,6 +4,8 @@
 
 #include <unistd.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <cstdint>
 
 #define NOT_FOUND NULL
 #define MAX_SMALLOC_SIZE 100000000 // 10^8
@@ -147,7 +149,7 @@ bool firstAllocator(){
     }
 
     // make the program break a multiple of 32*128kb
-    int addressRemainder = sbrk(0) % PROGRAM_BREAK_DIVISOR;
+    int addressRemainder = reinterpret_cast<uintptr_t>(sbrk(0)) % PROGRAM_BREAK_DIVISOR;
     if (addressRemainder != 0){
         if (sbrk(PROGRAM_BREAK_DIVISOR - addressRemainder) == (void*)(-1)) {
             return FIRST_ALLOC_FAIL;
@@ -190,7 +192,7 @@ void* allocateByMmap(size_t size){
                           PROT_READ | PROT_WRITE,
                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (newBlock == (void*)(-1)) {
-        return false;
+        return (void*)(-1);
     }
     MallocMetadata* newBlockMetadata = (MallocMetadata*)newBlock;
     newBlockMetadata->size = size;
@@ -291,15 +293,16 @@ void* smalloc(size_t size) {
         return (void*) ((char *) block + sizeof(MallocMetadata));
     }
     else { // if no free block found in the order, search in the next orders
-        for (int highOrder = tightOrder + 1; i <= MAX_ORDER; i++) {
+        for (int highOrder = tightOrder + 1; highOrder <= MAX_ORDER; highOrder++) {
             if (!(freeBlockListArray[highOrder].isEmpty())) {
                 // found a block with a higher order than needed
-                MallocMetadata* blockToSplit = freeBlockListArray[freeOrder]._popHead();
+                MallocMetadata* blockToSplit = freeBlockListArray[highOrder]._popHead();
                 // split the closest available block (if necessary) and return the new block
                 return splitBlock(blockToSplit, highOrder, tightOrder);
             }
         }
     }
+    return NULL;
 }
 
 
@@ -330,15 +333,16 @@ void* scalloc(size_t num, size_t size){
 // find buddy address
 void* findBuddyAddress(MallocMetadata* block){
     size_t blockSize = block->size + sizeof(MallocMetadata);
-    reinterpret_cast<std::uintptr_t> blockAddress = block;
+    std::uintptr_t blockAddress = reinterpret_cast<std::uintptr_t>((void*)block);
     std::uintptr_t buddyAddress = blockAddress ^ (std::uintptr_t)blockSize;
-    return reinterpret_cast<void*>buddyAddress;
+    return reinterpret_cast<void*>(buddyAddress);
 }
 
 MallocMetadata* mergeBlocks(MallocMetadata* blockMetadata, MallocMetadata* buddyAddress){
-    MallocMetadata* leftBlock, rightBlock;
+    MallocMetadata* leftBlock;
+    MallocMetadata* rightBlock;
 
-    reinterpret_cast<std::uintptr_t>blockMetadata < reinterpret_cast<std::uintptr_t>buddyAddress ?
+    reinterpret_cast<std::uintptr_t>(blockMetadata) < reinterpret_cast<std::uintptr_t>(buddyAddress) ?
                         (leftBlock = blockMetadata, rightBlock = buddyAddress)
                         :
                         (leftBlock = buddyAddress, rightBlock = blockMetadata);
@@ -404,14 +408,14 @@ void sfree(void* p){
 
 
 MallocMetadata* pickLeftBlock(MallocMetadata* block1, MallocMetadata* block2){
-    return (reinterpret_cast<std::uintptr_t>block1 < reinterpret_cast<std::uintptr_t>block2) ? block1 : block2;
+    return (reinterpret_cast<std::uintptr_t>(block1) < reinterpret_cast<std::uintptr_t>(block2)) ? block1 : block2;
 }
 
 // find buddy address by size, so we don't have to change the size of the block to find the buddy:
 void* findBuddyAddressBySize(MallocMetadata* block, size_t size){
-    reinterpret_cast<std::uintptr_t> blockAddress = block;
+    std::uintptr_t blockAddress = reinterpret_cast<std::uintptr_t>((void*)block);
     std::uintptr_t buddyAddress = blockAddress ^ (std::uintptr_t)size;
-    return reinterpret_cast<void*>buddyAddress;
+    return reinterpret_cast<void*>(buddyAddress);
 }
 
 // check if we can allocate the requested size by merging blocks
@@ -535,7 +539,7 @@ void* srealloc(void* oldp, size_t size){
             if (newAllocation == NULL) {
                 return NULL;
             }
-            MallocMetadata* newAllocatedBlock = (char*)newAllocation - sizeof(MallocMetadata);
+            MallocMetadata* newAllocatedBlock = (MallocMetadata*)((char*)newAllocation - sizeof(MallocMetadata));
             memmove(newAllocatedBlock, oldp, oldpSize);
             sfree(oldp);
             return (void*)((char*)newAllocatedBlock + sizeof(MallocMetadata));
