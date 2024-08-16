@@ -243,6 +243,8 @@ void* splitBlock(MallocMetadata* blockToSplit, int highOrder, int tightOrder){
         blockRightHalf->is_free = true;
         freeBlockListArray[highOrder]._addToList(blockRightHalf);
 
+        blockToSplit = blockLeftHalf;
+
         highOrder--;
     }
 
@@ -347,6 +349,7 @@ void* findBuddyAddressBySize(MallocMetadata* block, size_t size){
     return reinterpret_cast<void*>(buddyAddress);
 }
 
+// receives two blocks of the same size, buddy is free but blockMetadata might not be free:
 MallocMetadata* mergeBlocks(MallocMetadata* blockMetadata, MallocMetadata* buddyAddress){
     MallocMetadata* leftBlock;
     MallocMetadata* rightBlock;
@@ -360,14 +363,26 @@ MallocMetadata* mergeBlocks(MallocMetadata* blockMetadata, MallocMetadata* buddy
 
     freeBlockListArray[order]._removeFromList(buddyAddress);
 
+    // in case of a recurring merge, the "blockMetadata" might be free
+    if (blockMetadata->is_free){ // means that both blocks are free
+        freeBlockListArray[order]._removeFromList(blockMetadata);
+        num_free_block--;
+    }
+    else{
+        num_free_bytes += (int)blockMetadata->size;
+        blockMetadata->is_free = true;
+    }
+
     leftBlock->size = leftBlock->size + rightBlock->size + sizeof(MallocMetadata);
 
-    leftBlock->is_free = true;
-
-    num_free_block--;
     num_free_bytes += (int)sizeof(MallocMetadata);
     num_allocated_blocks--;
     num_allocated_bytes += (int)sizeof(MallocMetadata);
+
+    leftBlock->is_free = true;
+    int leftBlockOrder = findTightOrder(leftBlock->size);
+
+    freeBlockListArray[leftBlockOrder]._addToList(leftBlock);
 
     return leftBlock;
 }
@@ -398,20 +413,14 @@ void sfree(void* p){
         return;
     }
     else{ // if blockMetadata->size < MAX_ORDER_BLOCK_SIZE, meaning it was created by sbrk
-        while(blockMetadata->size < (MAX_ORDER_BLOCK_SIZE - sizeof(MallocMetadata)) ) {
-            MallocMetadata* buddyAddress = (MallocMetadata *) findBuddyAddress(blockMetadata);
+        while(findTightOrder(blockMetadata->size) < MAX_ORDER){
+            // merge with buddy
+            MallocMetadata* buddyAddress = (MallocMetadata*) findBuddyAddress(blockMetadata);
             if ( !(buddyAddress->is_free) || (buddyAddress->size != blockMetadata->size)){
                 break;
             }
             blockMetadata = mergeBlocks(blockMetadata, buddyAddress);
         }
-        blockMetadata->is_free = true;
-
-        int blockOrder = findTightOrder(blockMetadata->size);
-        freeBlockListArray[blockOrder]._addToList(blockMetadata);
-
-        num_free_block++;
-        num_free_bytes += (int)(blockMetadata->size);
     }
 }
 
