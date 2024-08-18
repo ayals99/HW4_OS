@@ -22,8 +22,6 @@ struct MallocMetadata{
     MallocMetadata* prev;
 };
 
-int num_free_block = ZERO; // every time we turn is_free to "true" we increment by 1
-int num_free_bytes = ZERO; // every time we turn is_free to "true" we increment by the size of the block
 
 int num_allocated_blocks = ZERO; // every time we add a block to the list we increment by 1
 int num_allocated_bytes = ZERO; // every time we add a block to the list we increment by the size of the block
@@ -31,6 +29,8 @@ int num_allocated_bytes = ZERO; // every time we add a block to the list we incr
 struct MetadataList {
     MallocMetadata* head;
     MallocMetadata* tail;
+    size_t num_blocks = ZERO;
+    size_t num_bytes = ZERO;
 
     MetadataList() : head(NULL), tail(NULL) {}
 	
@@ -44,10 +44,11 @@ struct MetadataList {
 		}
 		return false;
 	}
+
     void _addToList(MallocMetadata *metadata) {
-	//if (exists_in_list(metadata)){
-	//	return;
-	//}
+	    num_bytes+=metadata->size;
+        num_blocks++;
+
         if (head == NULL) {
             head = metadata;
             tail = metadata;
@@ -96,6 +97,9 @@ struct MetadataList {
         if (head == NULL){
             return NULL;
         }
+        num_bytes -= head->size;
+        num_blocks--;
+
         MallocMetadata* oldHead = head;
         head = head->next;
         oldHead->next = NULL;
@@ -111,6 +115,9 @@ struct MetadataList {
     }
 
     void _removeFromList(MallocMetadata* metadata) {
+        num_bytes -= metadata->size;
+        num_blocks--;
+
         if (metadata == head) {
             head = metadata->next;
             metadata->next = NULL;
@@ -196,9 +203,7 @@ bool firstAllocator(){
         freeBlockListArray[MAX_ORDER]._addToList(blockStart);
 
         // update global counters:
-        num_free_block++;
         num_allocated_blocks++;
-        num_free_bytes += (int)(blockStart->size);
         num_allocated_bytes += (int)(blockStart->size);
     }
     return FIRST_ALLOC_SUCCESS;
@@ -266,11 +271,6 @@ void* splitBlock(MallocMetadata* blockToSplit, int highOrder, int tightOrder){
         highOrder--;
     }
 
-    num_free_bytes -= amountOfSplits * sizeof(MallocMetadata);
-    num_free_bytes -= (int)(blockToSplit->size);
-
-    num_free_block += (amountOfSplits - 1);
-
     num_allocated_blocks += amountOfSplits;
     num_allocated_bytes -= amountOfSplits * sizeof(MallocMetadata);
 
@@ -310,8 +310,6 @@ void* smalloc(size_t size) {
     if ( !( (freeBlockListArray[tightOrder].isEmpty()) ) ) {
         MallocMetadata* block = freeBlockListArray[tightOrder]._popHead();
         block->is_free = false;
-        num_free_block--;
-        num_free_bytes -= (int) (block->size);
         return (void*) ((char *) block + sizeof(MallocMetadata));
     }
     else { // if no free block found in the order, search in the next orders
@@ -351,7 +349,6 @@ void* scalloc(size_t num, size_t size){
     return memset(newBlock, 0, totalSize);
 }
 
-
 // find buddy address
 void* findBuddyAddress(MallocMetadata* block){
     size_t blockSize = block->size + sizeof(MallocMetadata);
@@ -369,42 +366,6 @@ void* findBuddyAddressBySize(MallocMetadata* block, size_t size){
 
 // receives two blocks of the same size, buddy is free but blockMetadata might not be free:
 MallocMetadata* mergeBlocks(MallocMetadata* blockMetadata, MallocMetadata* buddyAddress){
- /*   MallocMetadata* leftBlock;
-    MallocMetadata* rightBlock;
-
-    reinterpret_cast<std::uintptr_t>(blockMetadata) < reinterpret_cast<std::uintptr_t>(buddyAddress) ?
-                        (leftBlock = blockMetadata, rightBlock = buddyAddress)
-                        :
-                        (leftBlock = buddyAddress, rightBlock = blockMetadata);
-
-    int order = findTightOrder(leftBlock->size);
-
-    freeBlockListArray[order]._removeFromList(buddyAddress);
-
-    // in case of a recurring merge, the "blockMetadata" might be free
-    if (blockMetadata->is_free){ // means that both blocks are free
-        freeBlockListArray[order]._removeFromList(blockMetadata);
-       // freeBlockListArray[order]._removeFromList(buddyAddress);
-        num_free_block--;
-       // num_allocated_blocks--;
-    }
-    else{
-        num_free_bytes += (int)blockMetadata->size;
-        blockMetadata->is_free = true;
-    }
-
-    leftBlock->size = leftBlock->size + rightBlock->size + sizeof(MallocMetadata);
-
-    num_free_bytes += (int)sizeof(MallocMetadata);
-    num_allocated_blocks--;
-    num_allocated_bytes += (int)sizeof(MallocMetadata);
-
-    leftBlock->is_free = true;
-    int leftBlockOrder = findTightOrder(leftBlock->size);
-
-    freeBlockListArray[leftBlockOrder]._addToList(leftBlock);
-
-    return leftBlock;*/
     MallocMetadata* leftBlock;
     MallocMetadata* rightBlock;
 
@@ -416,23 +377,17 @@ MallocMetadata* mergeBlocks(MallocMetadata* blockMetadata, MallocMetadata* buddy
     int order = findTightOrder(leftBlock->size);
 
     freeBlockListArray[order]._removeFromList(buddyAddress);
-//    freeBlockListArray[order]._removeFromList(blockMetadata);
-    //num_allocated_blocks=num_allocated_blocks-2;
+
     // in case of a recurring merge, the "blockMetadata" might be free
     if (blockMetadata->is_free){ // means that both blocks are free
         freeBlockListArray[order]._removeFromList(blockMetadata);
-       // freeBlockListArray[order]._removeFromList(buddyAddress);
-        num_free_block--;
-       // num_allocated_blocks--;
     }
     else{
-        num_free_bytes += (int)blockMetadata->size;
         blockMetadata->is_free = true;
     }
 
     leftBlock->size += rightBlock->size + sizeof(MallocMetadata);
 
-    num_free_bytes += (int)sizeof(MallocMetadata);
     num_allocated_blocks--;
     num_allocated_bytes += (int)sizeof(MallocMetadata);
 
@@ -648,32 +603,21 @@ void* srealloc(void* oldp, size_t size){
 
 /** @Return: Number of allocated blocks in the heap that are currently free.*/
 size_t _num_free_blocks(){
-    //return (size_t)num_free_block;
-    int numFreeBlocks = 0;
+    size_t numFreeBlocks = 0;
     for (int i = 0; i <= MAX_ORDER; i++) {
-        MallocMetadata* current = freeBlockListArray[i].head;
-        while (current != NULL) {
-            numFreeBlocks++;
-            current = current->next;
-        }
+        numFreeBlocks += freeBlockListArray[i].num_blocks;
     }
-    return (size_t)numFreeBlocks;
-
+    return numFreeBlocks;
 }
 
 /** @Return: Number of bytes in all allocated blocks in the heap that are currently free,
  * excluding the bytes used by the meta-data structs.*/
 size_t _num_free_bytes(){
-    //return (size_t)num_free_bytes;
-    int numFreeBytes = 0;
+    size_t numFreeBytes = 0;
     for (int i = 0; i <= MAX_ORDER; i++) {
-        MallocMetadata* current = freeBlockListArray[i].head;
-        while (current != NULL) {
-            numFreeBytes += (int)(current->size);
-            current = current->next;
-        }
+        numFreeBytes += freeBlockListArray[i].num_bytes;
     }
-    return (size_t)numFreeBytes;
+    return numFreeBytes;
 }
 
 /** @Return: the overall (free and used) number of allocated blocks in the heap.*/
