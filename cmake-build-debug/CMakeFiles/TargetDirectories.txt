@@ -1,0 +1,2 @@
+C:/Users/ayals/OneDrive/Documents/GitHub/HW4_OS/cmake-build-debug/CMakeFiles/edit_cache.dir
+C:/Users/ayals/OneDrive/Documents/GitHub/HW4_OS/cmake-build-debug/CMakeFiles/rebuild_cache.dir
