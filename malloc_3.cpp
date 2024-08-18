@@ -33,8 +33,21 @@ struct MetadataList {
     MallocMetadata* tail;
 
     MetadataList() : head(NULL), tail(NULL) {}
-
+	
+	bool exists_in_list(MallocMetadata* block){
+		MallocMetadata* current = head;
+		while(current != NULL){
+			if (current == block){
+				return true;
+			}			
+			current = current->next;
+		}
+		return false;
+	}
     void _addToList(MallocMetadata *metadata) {
+	//if (exists_in_list(metadata)){
+	//	return;
+	//}
         if (head == NULL) {
             head = metadata;
             tail = metadata;
@@ -92,6 +105,8 @@ struct MetadataList {
         else{ // if new head is NULL, then tail should be NULL as well
             tail = NULL;
         }
+        oldHead->is_free = false;
+        oldHead->prev = NULL;
         return oldHead;
     }
 
@@ -120,6 +135,8 @@ struct MetadataList {
             metadata->next = NULL;
             metadata->prev = NULL;
         }
+        metadata->next = NULL;
+        metadata->prev = NULL;
     }
 };
 
@@ -473,7 +490,10 @@ void sfree(void* p){
             buddyAddress = (MallocMetadata*) findBuddyAddress(blockMetadata);
             if ( !(buddyAddress->is_free) || (buddyAddress->size != blockMetadata->size)){
                 blockMetadata->is_free = true;
-                freeBlockListArray[findTightOrder((int)(blockMetadata->size))]._addToList(blockMetadata);
+		        bool inListAlready = freeBlockListArray[findTightOrder((int)(blockMetadata->size))].exists_in_list(blockMetadata);
+                if(!inListAlready){
+			        freeBlockListArray[findTightOrder((int)(blockMetadata->size))]._addToList(blockMetadata);
+		        }
                 break;
             }
             blockMetadata = mergeBlocks(blockMetadata, buddyAddress);
@@ -481,7 +501,6 @@ void sfree(void* p){
             //cnt++;
         }
         //num_allocated_blocks=cnt;
-        
     }
 }
 
