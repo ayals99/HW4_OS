@@ -7,6 +7,7 @@
 #include <sys/mman.h>
 #include <cstdint>
 #include <math.h>
+#include <iostream>
 
 #define NOT_FOUND NULL
 #define MAX_SMALLOC_SIZE 100000000 // 10^8
@@ -211,7 +212,7 @@ void* allocateByMmap(size_t size){
 
 int findTightOrder(size_t size){
     for (int i = 0; i <= MAX_ORDER; i++) {
-        if (size <= ( (128 * (1 << i) ) - sizeof(MallocMetadata)) ) {
+        if (size <= (size_t)( (128 * (1 << i) ) - sizeof(MallocMetadata)) ) {
             return i;
         }
     }
@@ -351,7 +352,7 @@ void* findBuddyAddressBySize(MallocMetadata* block, size_t size){
 
 // receives two blocks of the same size, buddy is free but blockMetadata might not be free:
 MallocMetadata* mergeBlocks(MallocMetadata* blockMetadata, MallocMetadata* buddyAddress){
-    MallocMetadata* leftBlock;
+ /*   MallocMetadata* leftBlock;
     MallocMetadata* rightBlock;
 
     reinterpret_cast<std::uintptr_t>(blockMetadata) < reinterpret_cast<std::uintptr_t>(buddyAddress) ?
@@ -366,7 +367,9 @@ MallocMetadata* mergeBlocks(MallocMetadata* blockMetadata, MallocMetadata* buddy
     // in case of a recurring merge, the "blockMetadata" might be free
     if (blockMetadata->is_free){ // means that both blocks are free
         freeBlockListArray[order]._removeFromList(blockMetadata);
+       // freeBlockListArray[order]._removeFromList(buddyAddress);
         num_free_block--;
+       // num_allocated_blocks--;
     }
     else{
         num_free_bytes += (int)blockMetadata->size;
@@ -384,7 +387,45 @@ MallocMetadata* mergeBlocks(MallocMetadata* blockMetadata, MallocMetadata* buddy
 
     freeBlockListArray[leftBlockOrder]._addToList(leftBlock);
 
+    return leftBlock;*/
+    MallocMetadata* leftBlock;
+    MallocMetadata* rightBlock;
+
+    reinterpret_cast<std::uintptr_t>(blockMetadata) < reinterpret_cast<std::uintptr_t>(buddyAddress) ?
+                        (leftBlock = blockMetadata, rightBlock = buddyAddress)
+                        :
+                        (leftBlock = buddyAddress, rightBlock = blockMetadata);
+
+    int order = findTightOrder(leftBlock->size);
+
+    freeBlockListArray[order]._removeFromList(buddyAddress);
+//    freeBlockListArray[order]._removeFromList(blockMetadata);
+    //num_allocated_blocks=num_allocated_blocks-2;
+    // in case of a recurring merge, the "blockMetadata" might be free
+    if (blockMetadata->is_free){ // means that both blocks are free
+        freeBlockListArray[order]._removeFromList(blockMetadata);
+       // freeBlockListArray[order]._removeFromList(buddyAddress);
+        num_free_block--;
+       // num_allocated_blocks--;
+    }
+    else{
+        num_free_bytes += (int)blockMetadata->size;
+        blockMetadata->is_free = true;
+    }
+
+    leftBlock->size += rightBlock->size + sizeof(MallocMetadata);
+
+    num_free_bytes += (int)sizeof(MallocMetadata);
+    num_allocated_blocks--;
+    num_allocated_bytes += (int)sizeof(MallocMetadata);
+
+    leftBlock->is_free = true;
+    int leftBlockOrder = findTightOrder(leftBlock->size);
+
+    freeBlockListArray[leftBlockOrder]._addToList(leftBlock);
+
     return leftBlock;
+    
 }
 
 /**
@@ -413,14 +454,34 @@ void sfree(void* p){
         return;
     }
     else{ // if blockMetadata->size < MAX_ORDER_BLOCK_SIZE, meaning it was created by sbrk
+        if(findTightOrder(blockMetadata->size) == MAX_ORDER){
+            blockMetadata->is_free = true;
+            freeBlockListArray[findTightOrder((int)(blockMetadata->size))]._addToList(blockMetadata);
+            return;
+        }
+        MallocMetadata* buddyAddress = (MallocMetadata*) findBuddyAddress(blockMetadata);
+		if (buddyAddress->is_free == false){
+            blockMetadata->is_free = true;
+			freeBlockListArray[findTightOrder((int)(blockMetadata->size))]._addToList(blockMetadata);
+            return;
+	    }
+	    //int cnt=0;
+
         while(findTightOrder(blockMetadata->size) < MAX_ORDER){
             // merge with buddy
-            MallocMetadata* buddyAddress = (MallocMetadata*) findBuddyAddress(blockMetadata);
+            //cnt++;
+            buddyAddress = (MallocMetadata*) findBuddyAddress(blockMetadata);
             if ( !(buddyAddress->is_free) || (buddyAddress->size != blockMetadata->size)){
+                blockMetadata->is_free = true;
+                freeBlockListArray[findTightOrder((int)(blockMetadata->size))]._addToList(blockMetadata);
                 break;
             }
             blockMetadata = mergeBlocks(blockMetadata, buddyAddress);
+            //num_allocated_blocks=num_allocated_blocks-1;
+            //cnt++;
         }
+        //num_allocated_blocks=cnt;
+        
     }
 }
 
@@ -433,13 +494,13 @@ MallocMetadata* pickLeftBlock(MallocMetadata* block1, MallocMetadata* block2){
 bool canAllocateWithMerges(MallocMetadata* oldpBlockMetadata, int requestedOrder) {
     MallocMetadata* blockToMerge = oldpBlockMetadata;
     size_t mergedSize = blockToMerge->size;
-    while (mergedSize < (MAX_ORDER_BLOCK_SIZE - sizeof(MallocMetadata))){
-        MallocMetadata* buddyAddress = (MallocMetadata *) findBuddyAddressBySize(blockToMerge, mergedSize);
+    while (findTightOrder(mergedSize) < requestedOrder){
+        MallocMetadata* buddyAddress = (MallocMetadata *) findBuddyAddressBySize(blockToMerge, mergedSize + sizeof(MallocMetadata));
         if ( !(buddyAddress->is_free) || (buddyAddress->size != mergedSize)) {
             return false;
         }
         blockToMerge = pickLeftBlock(blockToMerge, buddyAddress);
-        mergedSize = mergedSize + buddyAddress->size + sizeof(MallocMetadata);
+        mergedSize += buddyAddress->size + sizeof(MallocMetadata);
         if (mergedSize >= getOrderSize(requestedOrder) - sizeof(MallocMetadata)) {
             return true;
         }
@@ -447,20 +508,17 @@ bool canAllocateWithMerges(MallocMetadata* oldpBlockMetadata, int requestedOrder
     return false;
 }
 
+// merges blocks until the size of the merged block is equal to the requested order's size
+
+// receives a free block and the requested order
+
 MallocMetadata* mergeAndStopAtOrder(MallocMetadata* oldpBlockMetadata, int requestedOrder){
     MallocMetadata* blockToMerge = oldpBlockMetadata;
-    while (blockToMerge->size < (MAX_ORDER_BLOCK_SIZE - sizeof(MallocMetadata)))
-    {
+    while (findTightOrder(blockToMerge->size) < requestedOrder){
         MallocMetadata* buddyAddress = (MallocMetadata*) findBuddyAddress(blockToMerge);
-        if ( !(buddyAddress->is_free) || (buddyAddress->size != blockToMerge->size)){
-            return NULL;
-        }
         blockToMerge = mergeBlocks(blockToMerge, buddyAddress);
-        if (blockToMerge->size >= getOrderSize(requestedOrder) - sizeof(MallocMetadata)){
-            return blockToMerge;
-        }
     }
-    return NULL;
+    return blockToMerge;
 }
 
 
@@ -491,12 +549,13 @@ void* srealloc(void* oldp, size_t size){
         return smalloc(size);
     }
 
-    // from here on we assume that oldp was allocated from the blocks created by sbrk
     MallocMetadata* oldpBlockMetadata = (MallocMetadata*)( ((char*)oldp) - sizeof(MallocMetadata));
     size_t oldpSize = oldpBlockMetadata->size;
 
-    if ((oldpSize >= (size_t)MAX_ORDER_BLOCK_SIZE) || (size >= (size_t)MAX_ORDER_BLOCK_SIZE)){
-        // if oldp was allocated by mmap, then we can't reuse it unless the size is the same
+    // check if oldp was allocated by mmap or if "size" is too big for sbrk blocks:
+    if (    (oldpSize > (size_t)MAX_ORDER_BLOCK_SIZE- sizeof(MallocMetadata))
+         || (size > (size_t)MAX_ORDER_BLOCK_SIZE - sizeof(MallocMetadata)) ){
+        // if oldp was allocated by mmap, then we can reuse it only if the sizes are the same
         if (size == oldpSize){
             return oldp;
         }
@@ -511,67 +570,91 @@ void* srealloc(void* oldp, size_t size){
         }
     }
 
-    // from here on we assume that oldp was allocated by the initial sbrk
+    // from here on assume:
+    //      (oldpSize <= (size_t)MAX_ORDER_BLOCK_SIZE- sizeof(MallocMetadata))
+    //      and
+    //      (size <= (size_t)MAX_ORDER_BLOCK_SIZE - sizeof(MallocMetadata))
+
+    // meaning:
+    //      oldp was allocated by the initial sbrk
+    //      and the size is small enough for an sbrk block
 
     if (size <= oldpSize){
-        int tightOrder = findTightOrder(size);
-        int oldpOrder = findTightOrder(oldpSize);
-        if (tightOrder == oldpOrder){
-            if (oldpBlockMetadata->is_free){
-                oldpBlockMetadata->is_free = false;
-                num_free_bytes -= (int)(oldpBlockMetadata->size);
-                num_free_block--;
-            }
-            return oldp;
+        // Question 518 in piazza says that we don't need to split the block if downsizing in srealloc:
+        if (oldpBlockMetadata->is_free){
+            oldpBlockMetadata->is_free = false;
+            freeBlockListArray[findTightOrder(oldpBlockMetadata->size)]._removeFromList(oldpBlockMetadata);
         }
-        else{
-            // TODO: check that split_block updates global counters correctly
-            return splitBlock(oldpBlockMetadata, oldpOrder, tightOrder);
-        }
+        return oldp;
     }
     else{ // if size > oldpBlockMetadata->size
+        // notice that oldp order is smaller than MAX_ORDER, meaning between 0 to 9
         int requestedOrder = findTightOrder(size);
-        if(canAllocateWithMerges(oldpBlockMetadata, requestedOrder)){
-            if( !(oldpBlockMetadata->is_free)){
-                num_free_bytes += (int)(oldpBlockMetadata->size);
-                num_free_block++;
-                oldpBlockMetadata->is_free = true;
-                freeBlockListArray[findTightOrder(oldpBlockMetadata->size)]._addToList(oldpBlockMetadata);
-            }
-            MallocMetadata* mergedBlock = mergeAndStopAtOrder(oldpBlockMetadata, requestedOrder);
-            if (mergedBlock == NULL){
-                return NULL;
-            }
-            // TODO: check that mergeBlocks updates global counters correctly
-            if(mergedBlock->is_free){
-                num_free_bytes -= (int)(oldpBlockMetadata->size);
-                num_free_block--;
-                mergedBlock->is_free = false;
-            }
-            return (void*)((char*)mergedBlock + sizeof(MallocMetadata));
-        }
-        else{
+
+        // if can't allocate the requested size by merging blocks
+        if( !canAllocateWithMerges(oldpBlockMetadata, requestedOrder)){
+            // allocate new block
             void* newAllocation = smalloc(size);
             if (newAllocation == NULL) {
                 return NULL;
             }
-            MallocMetadata* newAllocatedBlock = (MallocMetadata*)((char*)newAllocation - sizeof(MallocMetadata));
-            memmove(newAllocatedBlock, oldp, oldpSize);
+
+            // copy oldp to newAllocation
+            memmove(newAllocation, oldp, oldpSize);
+            // free oldp
             sfree(oldp);
-            return (void*)((char*)newAllocatedBlock + sizeof(MallocMetadata));
+
+            return newAllocation;
         }
-    }
+
+        // from here on, assume that we can allocate the requested size by merging blocks:
+        // if oldp isn't free, then we need to free it in order to merge it with it's buddy
+        if( !(oldpBlockMetadata->is_free)){
+            oldpBlockMetadata->is_free = true;
+            freeBlockListArray[findTightOrder(oldpBlockMetadata->size)]._addToList(oldpBlockMetadata);
+        }
+        MallocMetadata* mergedBlock = mergeAndStopAtOrder(oldpBlockMetadata, requestedOrder);
+        if (mergedBlock == NULL){
+            return NULL;
+        }
+
+        if(mergedBlock->is_free){
+            mergedBlock->is_free = false;
+            freeBlockListArray[requestedOrder]._removeFromList(mergedBlock);
+        }
+        return (void*)((char*) mergedBlock + sizeof(MallocMetadata));
+        }
+    return NULL;
 }
 
 /** @Return: Number of allocated blocks in the heap that are currently free.*/
 size_t _num_free_blocks(){
-    return (size_t)num_free_block;
+    //return (size_t)num_free_block;
+    int numFreeBlocks = 0;
+    for (int i = 0; i <= MAX_ORDER; i++) {
+        MallocMetadata* current = freeBlockListArray[i].head;
+        while (current != NULL) {
+            numFreeBlocks++;
+            current = current->next;
+        }
+    }
+    return (size_t)numFreeBlocks;
+
 }
 
 /** @Return: Number of bytes in all allocated blocks in the heap that are currently free,
  * excluding the bytes used by the meta-data structs.*/
 size_t _num_free_bytes(){
-    return (size_t)num_free_bytes;
+    //return (size_t)num_free_bytes;
+    int numFreeBytes = 0;
+    for (int i = 0; i <= MAX_ORDER; i++) {
+        MallocMetadata* current = freeBlockListArray[i].head;
+        while (current != NULL) {
+            numFreeBytes += (int)(current->size);
+            current = current->next;
+        }
+    }
+    return (size_t)numFreeBytes;
 }
 
 /** @Return: the overall (free and used) number of allocated blocks in the heap.*/
